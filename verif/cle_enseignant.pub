@@ -1,0 +1,8 @@
+# Clé publique de l'enseignant (facultatif).
+#
+# Collez ici UNE ligne : le contenu de ~/.ssh/id_ed25519.pub (jamais la clé privée !).
+# install-prof.sh l'ajoutera aux clés du compte prof, avec la même limitation :
+# elle ne pourra lancer que verif-lab. Les lignes qui commencent par # sont ignorées.
+#
+# Exemple de forme attendue :
+# ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… prenom.nom@eafc

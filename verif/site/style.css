@@ -1,0 +1,60 @@
+/* Site de contrôle du labo — style EAFC (fond sombre, accent orange). Aucune ressource externe. */
+:root {
+  --fond: #141821; --carte: #1c2330; --bord: #2c3547;
+  --texte: #e4e7eb; --muet: #a0a7b0; --orange: #e8873c; --or: #e7bf5f;
+  --ok: #6fbf8e; --ko: #e5675a; --warn: #e7bf5f; --info: #7fa7d6;
+}
+* { box-sizing: border-box; }
+html { background: var(--fond); }
+body { margin: 0; color: var(--texte); background: var(--fond);
+  font: 16px/1.5 "Century Gothic", "Segoe UI", Arial, sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+code { font-family: "Courier New", monospace; color: var(--or); }
+.kicker { margin: 0; color: var(--or); font-size: 12px; font-weight: bold; letter-spacing: 3px; }
+h1 { margin: 4px 0 8px; font-size: 32px; font-weight: normal; }
+h2 { margin: 0 0 8px; font-size: 22px; color: var(--orange); }
+h3 { margin: 22px 0 6px; font-size: 14px; letter-spacing: 2px; text-transform: uppercase; color: var(--or); }
+.intro, .date, footer { color: var(--muet); font-size: 14px; }
+.hote { color: var(--muet); font-size: 14px; font-weight: normal; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 20px 0; }
+.actions form { margin: 0; }
+button { font: inherit; cursor: pointer; border-radius: 8px; padding: 10px 18px; border: 1px solid var(--bord); color: var(--texte); background: var(--carte); }
+button.principal { background: var(--orange); border-color: var(--orange); color: #141821; font-weight: bold; }
+button.principal:hover { filter: brightness(1.08); }
+button.discret { color: var(--muet); font-size: 14px; }
+.lien { color: var(--or); font-size: 14px; }
+
+.message { background: var(--carte); border: 1px solid var(--or); border-radius: 8px; padding: 10px 14px; color: var(--or); }
+.vide { color: var(--muet); }
+.erreur { background: rgba(229, 103, 90, .12); border: 1px solid var(--ko); border-radius: 8px; padding: 10px 14px; }
+
+.global, .machine { background: var(--carte); border: 1px solid var(--bord); border-radius: 12px; padding: 18px 20px; margin: 16px 0; }
+.global { display: flex; gap: 20px; align-items: center; }
+.global p { margin: 0; }
+.titre-global { font-weight: bold; }
+.score { min-width: 92px; text-align: center; font-size: 28px; font-weight: bold; border-radius: 10px; padding: 8px 12px; border: 2px solid; }
+.score.petit { display: inline-block; min-width: 0; font-size: 16px; padding: 2px 10px; margin-right: 8px; }
+.score.bon { color: var(--ok); border-color: var(--ok); }
+.score.moyen { color: var(--warn); border-color: var(--warn); }
+.score.faible { color: var(--ko); border-color: var(--ko); }
+.bilan { margin: 0 0 8px; }
+ul.meta { list-style: none; margin: 0 0 4px; padding: 0; color: var(--muet); font-size: 14px; }
+ul.meta b { color: var(--texte); font-weight: normal; margin-right: 6px; }
+
+ul.checks { list-style: none; margin: 0; padding: 0; }
+ul.checks li { padding: 8px 0; border-top: 1px solid var(--bord); }
+ul.checks li:first-child { border-top: 0; }
+.badge { display: inline-block; min-width: 92px; text-align: center; font-size: 12px; font-weight: bold; border-radius: 6px; padding: 1px 8px; margin-right: 8px; border: 1px solid; }
+.st-ok .badge { color: var(--ok); border-color: var(--ok); }
+.st-ko .badge { color: var(--ko); border-color: var(--ko); }
+.st-warn .badge { color: var(--warn); border-color: var(--warn); }
+.st-info .badge { color: var(--info); border-color: var(--info); }
+.det { color: var(--muet); font-size: 14px; }
+.conseil { display: block; margin: 4px 0 0 108px; color: var(--or); font-size: 14px; }
+footer { margin-top: 32px; }
+
+@media (max-width: 600px) {
+  .conseil { margin-left: 0; }
+  .global { flex-direction: column; align-items: flex-start; }
+}
