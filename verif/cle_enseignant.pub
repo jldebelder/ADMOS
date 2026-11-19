@@ -6,3 +6,4 @@
 #
 # Exemple de forme attendue :
 # ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… prenom.nom@eafc
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDQ3y/tgaauXo4vlAWu47NSYj8PvTf2/gPycbuE8+m6S suivi-admos@suivi-admos
