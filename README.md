@@ -5,7 +5,8 @@ Auteur : Jean-Louis De Belder.
 
 | Dossier | Contenu |
 |---|---|
-| [`verif/`](verif/README.md) | Outil de contrôle des labos : routage et NAT, DHCP, SSH, Apache2 et PHP, iptables, fail2ban |
+| [`verif/`](verif/README.md) | Outil de contrôle des labos 01 à 10 (un labo au choix ou toute la configuration), installé par chaque étudiant |
+| [`suivi/`](suivi/README.md) | Serveur de suivi de l'enseignant : résultats envoyés par les étudiants, relève de toute la classe, export CSV |
 
 ## Récupérer le dépôt sur dupont-pc
 

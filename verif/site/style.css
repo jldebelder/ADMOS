@@ -58,3 +58,19 @@ footer { margin-top: 32px; }
   .conseil { margin-left: 0; }
   .global { flex-direction: column; align-items: flex-start; }
 }
+
+/* Choix du labo, grille des scores par labo, statut de l'envoi au suivi */
+.choix { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 20px 0 0; background: var(--carte); border: 1px solid var(--bord); border-radius: 12px; padding: 14px 16px; }
+.choix label { width: 100%; color: var(--muet); font-size: 14px; }
+.choix select { flex: 1; min-width: 260px; font: inherit; color: var(--texte); background: var(--fond); border: 1px solid var(--bord); border-radius: 8px; padding: 9px 10px; }
+.suivi { font-size: 14px; margin: 4px 0 0; }
+.suivi.envoye { color: var(--ok); }
+.suivi.echec { color: var(--warn); }
+.labos { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin: 16px 0; }
+.labo-case { background: var(--carte); border: 1px solid var(--bord); border-left: 4px solid; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; }
+.labo-case.bon { border-left-color: var(--ok); } .labo-case.moyen { border-left-color: var(--warn); } .labo-case.faible { border-left-color: var(--ko); }
+.labo-case .num { font-size: 12px; letter-spacing: 2px; color: var(--or); text-transform: uppercase; }
+.labo-case .pct { font-size: 22px; font-weight: bold; }
+.labo-case.bon .pct { color: var(--ok); } .labo-case.moyen .pct { color: var(--warn); } .labo-case.faible .pct { color: var(--ko); }
+.labo-case .nom { font-size: 13px; }
+.labo-case .nb { font-size: 12px; color: var(--muet); }

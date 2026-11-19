@@ -1,7 +1,8 @@
 <?php
 // Site de contrôle du labo — EAFC Uccle, Logiciel open source 2026-2027.
 // Le site se connecte en SSH (compte prof, clé restreinte) à chaque machine et affiche le
-// rapport du script verif-lab. Il ne modifie rien sur les machines contrôlées.
+// rapport du script verif-lab, pour tous les labos ou pour un seul. Il ne modifie rien sur les
+// machines contrôlées. Chaque résultat est aussi envoyé au serveur de suivi de l'enseignant.
 
 date_default_timezone_set('Europe/Brussels');
 $cfg = require __DIR__ . '/config.php';
@@ -51,14 +52,25 @@ function sauver($f, $d) {
 }
 
 // ---- Connexion SSH et lecture du rapport ---------------------------------------
-function ssh_lancer($cfg, $hote) {
+// « tout » ou un n° de labo présent dans la configuration
+function labo_valide($cfg, $l) {
+    return ($l === 'tout' || isset($cfg['labos'][$l])) ? $l : null;
+}
+
+function titre_labo($cfg, $l) {
+    if ($l === 'tout' || $l === null) { return 'Tous les labos'; }
+    if ($l === '00') { return 'Système'; }
+    return 'Labo ' . $l . (isset($cfg['labos'][$l]) ? ' — ' . $cfg['labos'][$l]['titre'] : '');
+}
+
+function ssh_lancer($cfg, $hote, $labo) {
     $cmd = [
         'ssh', '-T', '-i', $cfg['ssh_key'],
         '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'ConnectTimeout=5',
         '-o', 'StrictHostKeyChecking=accept-new',
         '-o', 'UserKnownHostsFile=' . $cfg['known_hosts'],
         '-o', 'LogLevel=ERROR',
-        $cfg['ssh_user'] . '@' . $hote, 'verif',
+        $cfg['ssh_user'] . '@' . $hote, ($labo === 'tout') ? 'verif' : 'verif ' . $labo,
     ];
     $desc = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
     $env = ['HOME' => $cfg['etat'], 'PATH' => '/usr/bin:/bin'];
@@ -114,6 +126,7 @@ function parser($out) {
             $checks[] = [
                 'section' => $f[1], 'id' => $f[2], 'statut' => $f[3],
                 'libelle' => $f[4], 'detail' => $f[5], 'conseil' => $f[6],
+                'labo' => (isset($f[7]) && preg_match('/^\d\d$/', $f[7])) ? $f[7] : '00',
             ];
         }
     }
@@ -136,13 +149,15 @@ function expliquer($err) {
     return ($err !== '') ? $err : "aucune réponse du script de contrôle.";
 }
 
-function lancer($cfg) {
-    $res = ['date' => time(), 'machines' => []];
+function lancer($cfg, $labo) {
+    $res = ['date' => time(), 'labo' => $labo, 'machines' => []];
     foreach ($cfg['cibles'] as $c) {
+        // Un labo qui ne concerne pas cette machine (ex. SMTP sur le routeur) : on ne la contacte pas.
+        if ($labo !== 'tout' && !in_array($c['id'], $cfg['labos'][$labo]['machines'], true)) { continue; }
         $m = ['id' => $c['id'], 'nom' => $c['nom'], 'hote' => null, 'erreur' => null, 'meta' => [], 'checks' => []];
         $notes = [];
         foreach ($c['hotes'] as $i => $hote) {
-            $r = ssh_lancer($cfg, $hote);
+            $r = ssh_lancer($cfg, $hote, $labo);
             if ($r['ok']) {
                 list($meta, $checks) = parser($r['out']);
                 $m['hote'] = $hote;
@@ -150,7 +165,7 @@ function lancer($cfg) {
                 $m['checks'] = $checks;
                 if ($i > 0) {
                     array_unshift($m['checks'], [
-                        'section' => 'Réseau du PC', 'id' => 'site.joignable', 'statut' => 'KO',
+                        'section' => 'Réseau du PC', 'labo' => '02', 'id' => 'site.joignable', 'statut' => 'KO',
                         'libelle' => 'La machine répond sur ' . $c['hotes'][0],
                         'detail' => 'contrôle fait via ' . $hote,
                         'conseil' => 'Adresse prévue : ' . $c['hotes'][0] . '. Vérifier la réservation DHCP ou l\'adresse statique.',
@@ -166,6 +181,20 @@ function lancer($cfg) {
     return $res;
 }
 
+// Envoi du résultat au serveur de suivi de l'enseignant (ne bloque jamais l'étudiant plus de quelques secondes).
+function envoyer_suivi($cfg, $d) {
+    if (empty($cfg['suivi_url'])) { return null; }
+    $corps = json_encode(['source' => 'site'] + $d, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+    $ctx = stream_context_create(['http' => [
+        'method' => 'POST', 'header' => "Content-Type: application/json\r\n",
+        'content' => $corps, 'timeout' => (int)$cfg['suivi_timeout'], 'ignore_errors' => true,
+    ]]);
+    $rep = @file_get_contents($cfg['suivi_url'], false, $ctx);
+    if ($rep !== false && strncmp(trim($rep), 'OK', 2) === 0) { return ['ok' => true, 'texte' => 'Résultat transmis à l\'enseignant.']; }
+    $raison = ($rep === false) ? 'serveur de suivi injoignable' : trim(substr(strip_tags($rep), 0, 120));
+    return ['ok' => false, 'texte' => 'Résultat non transmis à l\'enseignant (' . $raison . ').'];
+}
+
 // ---- Bilans et rapports --------------------------------------------------------
 function bilan($checks) {
     $b = ['OK' => 0, 'KO' => 0, 'WARN' => 0, 'INFO' => 0];
@@ -176,6 +205,18 @@ function bilan($checks) {
     $b['total'] = $tot;
     $b['score'] = ($tot > 0) ? (int)round(100 * $b['OK'] / $tot) : 0;
     return $b;
+}
+
+function par_labo($machines) {
+    $g = [];
+    foreach ($machines as $m) {
+        foreach ($m['checks'] as $c) {
+            $l = isset($c['labo']) ? $c['labo'] : '00';
+            if ($l !== '00') { $g[$l][] = $c; }
+        }
+    }
+    ksort($g);
+    return $g;
 }
 
 function grouper($checks) {
@@ -191,9 +232,11 @@ function libelle_statut($s) {
     return isset($t[$s]) ? $t[$s] : $s;
 }
 
-function rapport_texte($d) {
+function rapport_texte($cfg, $d) {
     $o = "RAPPORT DE CONTRÔLE DU LABO — EAFC Uccle\n";
     $o .= 'Date : ' . date('d/m/Y H:i:s', (int)$d['date']) . "\n";
+    $o .= 'Contrôle : ' . titre_labo($cfg, isset($d['labo']) ? $d['labo'] : 'tout') . "\n";
+    if (!empty($d['suivi']['texte'])) { $o .= $d['suivi']['texte'] . "\n"; }
     foreach ($d['machines'] as $m) {
         $nom = isset($m['meta']['hostname']) ? $m['meta']['hostname'] : $m['nom'];
         $o .= "\n==================== " . $m['nom'] . ' (' . $nom . ") ====================\n";
@@ -223,6 +266,7 @@ $messages = [
     'trop_vite' => "Patientez quelques secondes entre deux vérifications.",
     'ecriture'  => "Impossible d'écrire le résultat dans " . $etat . " : vérifier les droits de www-data.",
     'reset'     => "Empreintes SSH oubliées : elles seront réapprises à la prochaine vérification.",
+    'labo'      => "Labo inconnu.",
     'fait'      => "",
 ];
 $code = isset($_GET['m']) ? (string)$_GET['m'] : '';
@@ -243,11 +287,15 @@ if ($methode === 'POST') {
     }
     $action = isset($_POST['action']) ? (string)$_POST['action'] : '';
     if ($action === 'run') {
+        $labo = labo_valide($cfg, isset($_POST['labo']) ? (string)$_POST['labo'] : 'tout');
         $age = is_file($fichier) ? (time() - (int)filemtime($fichier)) : PHP_INT_MAX;
-        if ($age < (int)$cfg['delai_min']) {
+        if ($labo === null) {
+            $code = 'labo';
+        } elseif ($age < (int)$cfg['delai_min']) {
             $code = 'trop_vite';
         } else {
-            $data = lancer($cfg);
+            $data = lancer($cfg, $labo);
+            $data['suivi'] = envoyer_suivi($cfg, $data);
             $code = sauver($fichier, $data) ? 'fait' : 'ecriture';
         }
     } elseif ($action === 'reset') {
@@ -267,7 +315,7 @@ if ($format === 'txt' || isset($_GET['rapport'])) {
     header('Content-Type: text/plain; charset=UTF-8');
     if (isset($_GET['rapport'])) { header('Content-Disposition: attachment; filename="rapport-labo.txt"'); }
     if ($msg !== '') { echo $msg . "\n\n"; }
-    echo $data ? rapport_texte($data) : "Aucun résultat : lancez une vérification (POST action=run).\n";
+    echo $data ? rapport_texte($cfg, $data) : "Aucun résultat : lancez une vérification (POST action=run, labo=tout ou 01 à 10).\n";
     exit;
 }
 
@@ -297,11 +345,20 @@ $bg = bilan($toutes);
 <p class="message"><?= h($msg) ?></p>
 <?php endif; ?>
 
+<?php $dernier_labo = ($data && isset($data['labo'])) ? $data['labo'] : 'tout'; ?>
+<form method="post" action="./" class="choix">
+  <input type="hidden" name="action" value="run">
+  <label for="labo">Que voulez-vous contrôler ?</label>
+  <select name="labo" id="labo">
+    <option value="tout"<?= $dernier_labo === 'tout' ? ' selected' : '' ?>>Toute la configuration (tous les labos)</option>
+    <?php foreach ($cfg['labos'] as $n => $l): ?>
+      <option value="<?= h($n) ?>"<?= $dernier_labo === $n ? ' selected' : '' ?>>Labo <?= h($n) ?> — <?= h($l['titre']) ?></option>
+    <?php endforeach; ?>
+  </select>
+  <button type="submit" class="principal">Lancer la vérification</button>
+</form>
+
 <div class="actions">
-  <form method="post" action="./">
-    <input type="hidden" name="action" value="run">
-    <button type="submit" class="principal">Lancer la vérification</button>
-  </form>
   <?php if ($data): ?>
   <a class="lien" href="?rapport=1">Télécharger le rapport (.txt)</a>
   <?php endif; ?>
@@ -314,7 +371,10 @@ $bg = bilan($toutes);
 <?php if (!$data): ?>
 <p class="vide">Aucune vérification enregistrée. Cliquez sur « Lancer la vérification ».</p>
 <?php else: ?>
-<p class="date">Dernière vérification : <?= h(date('d/m/Y H:i:s', (int)$data['date'])) ?></p>
+<p class="date">Dernière vérification : <?= h(date('d/m/Y H:i:s', (int)$data['date'])) ?> — <b><?= h(titre_labo($cfg, $dernier_labo)) ?></b></p>
+<?php if (!empty($data['suivi']['texte'])): ?>
+<p class="suivi <?= $data['suivi']['ok'] ? 'envoye' : 'echec' ?>"><?= h($data['suivi']['texte']) ?></p>
+<?php endif; ?>
 
 <section class="global">
   <div class="score <?= h(classe_score($bg['score'])) ?>"><?= (int)$bg['score'] ?> %</div>
@@ -323,6 +383,19 @@ $bg = bilan($toutes);
     <p><?= (int)$bg['OK'] ?> OK · <?= (int)$bg['KO'] ?> KO · <?= (int)$bg['WARN'] ?> à améliorer — sur <?= (int)$bg['total'] ?> contrôles</p>
   </div>
 </section>
+
+<?php $pl = par_labo($data['machines']); if (count($pl) > 1): ?>
+<section class="labos">
+  <?php foreach ($pl as $n => $liste): $b = bilan($liste); ?>
+  <div class="labo-case <?= h(classe_score($b['score'])) ?>">
+    <span class="num">Labo <?= h($n) ?></span>
+    <span class="pct"><?= (int)$b['score'] ?> %</span>
+    <span class="nom"><?= h(isset($cfg['labos'][$n]) ? $cfg['labos'][$n]['titre'] : '') ?></span>
+    <span class="nb"><?= (int)$b['KO'] ?> KO · <?= (int)$b['WARN'] ?> à améliorer</span>
+  </div>
+  <?php endforeach; ?>
+</section>
+<?php endif; ?>
 
 <?php foreach ($data['machines'] as $m): ?>
 <?php $nom = isset($m['meta']['hostname']) ? $m['meta']['hostname'] : $m['nom']; ?>
@@ -340,7 +413,8 @@ $bg = bilan($toutes);
       <?php endforeach; ?>
     </ul>
     <?php foreach (grouper($m['checks']) as $sec => $liste): ?>
-      <h3><?= h($sec) ?></h3>
+      <?php $nl = isset($liste[0]['labo']) ? $liste[0]['labo'] : '00'; ?>
+      <h3><?= ($nl !== '00') ? 'Labo ' . h($nl) . ' · ' : '' ?><?= h($sec) ?></h3>
       <ul class="checks">
       <?php foreach ($liste as $c): ?>
         <li class="st-<?= h(strtolower($c['statut'])) ?>">
@@ -359,7 +433,7 @@ $bg = bilan($toutes);
 <?php endforeach; ?>
 <?php endif; ?>
 
-<footer>Outil en lecture seule : le compte prof ne peut lancer que le script <code>verif-lab</code>. Même rapport en console : <code>verif-lab --texte</code>.</footer>
+<footer>Outil en lecture seule : le compte prof ne peut lancer que le script <code>verif-lab</code>. Même rapport en console : <code>verif-lab --texte</code> (ou <code>verif-lab --texte --labo 05</code>).</footer>
 </main>
 </body>
 </html>

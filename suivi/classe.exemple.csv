@@ -1,0 +1,7 @@
+# Liste de la classe pour le serveur de suivi : id;nom;prenom;wan
+#   id  = n° de l'étudiant dans le plan d'adressage (VLAN 200+id, réseau 172.17.id.0)
+#   wan = adresse WAN de SON ROUTEUR (sans /16) : c'est elle qui identifie l'étudiant
+# Ce fichier contient des données personnelles : ne pas le publier dans le dépôt.
+id;nom;prenom;wan
+1;DUPONT;Jean;172.17.1.10
+2;MARTIN;Claire;172.17.2.10

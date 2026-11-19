@@ -10,7 +10,10 @@
 # Ce que fait le script :
 #   - installe /usr/local/sbin/verif-lab (contrôle en lecture seule) ;
 #   - crée le compte « prof » : pas de mot de passe, connexion par clé SSH
-#     uniquement, et cette clé ne peut lancer QUE verif-lab (restrict + command=) ;
+#     uniquement, et cette clé ne peut lancer QUE verif-lab (restrict + command=),
+#     pour tous les labos ou pour un seul (verif 05) ;
+#   - ajoute la clé de l'enseignant (cle_enseignant.pub) : même limitation ; sur le
+#     routeur, elle peut en plus rebondir vers le PC (10.68.69.10:22) pour la relève ;
 #   - sur dupont-pc : génère la clé du site, installe le site dans
 #     /var/www/eafc.lab/html/verif/ et teste la connexion ;
 #   - sur dupont-routeur : récupère la clé publique du PC (http://10.68.69.10/verif/cle.pub).
@@ -28,7 +31,7 @@ IP_ROUTEUR="10.68.69.1"
 IP_PC="10.68.69.10"
 DOCROOT="/var/www/eafc.lab/html"
 ETAT="/var/lib/verif"
-CMD_FORCEE='sudo -n /usr/local/sbin/verif-lab'
+CMD_FORCEE='/usr/local/bin/verif-lab-ssh'
 ROLE=""; CLE=""; CLE_FICHIER=""
 
 msg() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
@@ -48,6 +51,7 @@ done
 
 [ "$(id -u)" -eq 0 ] || { err "À lancer en root : su -  puis  bash install-prof.sh"; exit 1; }
 [ -f "$DIR/verif-lab.sh" ] || { err "verif-lab.sh introuvable à côté de install-prof.sh ($DIR)."; exit 1; }
+[ -f "$DIR/verif-lab-ssh.sh" ] || { err "verif-lab-ssh.sh introuvable à côté de install-prof.sh ($DIR) : git pull."; exit 1; }
 
 # ------------------------------- rôle ----------------------------------------
 if [ -z "$ROLE" ]; then
@@ -84,6 +88,7 @@ fi
 # ------------------------- script de contrôle --------------------------------
 msg "Installation de /usr/local/sbin/verif-lab"
 install -o root -g root -m 755 "$DIR/verif-lab.sh" /usr/local/sbin/verif-lab
+install -o root -g root -m 755 "$DIR/verif-lab-ssh.sh" /usr/local/bin/verif-lab-ssh
 
 # ------------------------------ compte prof ----------------------------------
 if id prof >/dev/null 2>&1; then
@@ -95,13 +100,16 @@ fi
 usermod -p '*' prof                       # aucun mot de passe : connexion par clé uniquement
 HOME_PROF=$(getent passwd prof | cut -d: -f6)
 
-msg "Droits sudo limités à verif-lab, sans argument"
+msg "Droits sudo limités à verif-lab (tous les labos, ou --labo 01 à 10)"
 SUDOERS=/etc/sudoers.d/prof-verif
 TMP=$(mktemp)
-cat > "$TMP" <<'EOF'
-# Le compte prof ne peut lancer que le script de contrôle, sans argument.
-prof ALL=(root) NOPASSWD: /usr/local/sbin/verif-lab ""
-EOF
+{
+  echo '# Le compte prof ne peut lancer que le script de contrôle : sans argument, ou --labo NN.'
+  echo 'prof ALL=(root) NOPASSWD: /usr/local/sbin/verif-lab ""'
+  for n in 01 02 03 04 05 06 07 08 09 10; do
+    echo "prof ALL=(root) NOPASSWD: /usr/local/sbin/verif-lab --labo $n"
+  done
+} > "$TMP"
 if visudo -cf "$TMP" >/dev/null 2>&1; then
   install -o root -g root -m 440 "$TMP" "$SUDOERS"; rm -f "$TMP"
 else
@@ -110,6 +118,7 @@ fi
 
 # ------------------------- clés autorisées pour prof -------------------------
 KEYS=()
+KEYS_PROF=()
 cle_valide() { [[ "$1" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+)\ [A-Za-z0-9+/=]+(\ [^\"]*)?$ ]]; }
 
 if [ "$ROLE" = "pc" ]; then
@@ -139,7 +148,7 @@ fi
 # Clé facultative de l'enseignant (fichier cle_enseignant.pub du dépôt)
 if [ -f "$DIR/cle_enseignant.pub" ]; then
   while IFS= read -r l || [ -n "$l" ]; do
-    if cle_valide "$l"; then KEYS+=("$l"); msg "Clé enseignant ajoutée."; fi
+    if cle_valide "$l"; then KEYS_PROF+=("$l"); msg "Clé enseignant ajoutée."; fi
   done < "$DIR/cle_enseignant.pub"
 fi
 
@@ -149,8 +158,22 @@ AK="$HOME_PROF/.ssh/authorized_keys"
 for k in "${KEYS[@]}"; do
   printf 'restrict,command="%s" %s\n' "$CMD_FORCEE" "$k" >> "$AK"
 done
+# Clé de l'enseignant : sur le routeur, elle peut aussi ouvrir UN tunnel, vers le SSH du PC
+# (ssh -J prof@<WAN du routeur> prof@10.68.69.10), pour relever le PC depuis le réseau de l'école.
+for k in "${KEYS_PROF[@]}"; do
+  if [ "$ROLE" = "routeur" ]; then
+    printf 'restrict,port-forwarding,permitopen="%s:22",command="%s" %s\n' "$IP_PC" "$CMD_FORCEE" "$k" >> "$AK"
+  else
+    printf 'restrict,command="%s" %s\n' "$CMD_FORCEE" "$k" >> "$AK"
+  fi
+done
 chown prof:prof "$AK"; chmod 600 "$AK"
-msg "${#KEYS[@]} clé(s) autorisée(s) pour prof (restrict + commande imposée)"
+msg "$(( ${#KEYS[@]} + ${#KEYS_PROF[@]} )) clé(s) autorisée(s) pour prof (restrict + commande imposée)"
+if [ "$ROLE" = "routeur" ] && [ "${#KEYS_PROF[@]}" -gt 0 ]; then
+  if [ "$(sshd -T 2>/dev/null | awk '$1=="allowtcpforwarding"{print $2}')" = "no" ]; then
+    avert "AllowTcpForwarding no dans sshd_config : la relève du PC par l'enseignant ne passera pas."
+  fi
+fi
 
 # ------------------------------ site (PC) ------------------------------------
 if [ "$ROLE" = "pc" ]; then
