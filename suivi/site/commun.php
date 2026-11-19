@@ -19,7 +19,7 @@ function ip_dans_reseau($ip, $cidr) {
     return ($ipl & $mask) === ($netl & $mask);
 }
 
-// ---- La classe : classe.csv (id;nom;prenom;wan) ---------------------------------
+// ---- La classe : classe.csv (id;nom;prenom;wan;classe) ---------------------------
 function classe($cfg) {
     $f = chemin($cfg, 'classe.csv');
     $out = [];
@@ -31,10 +31,61 @@ function classe($cfg) {
         if (count($c) < 3 || !preg_match('/^[0-9]+$/', $c[0])) { continue; }   // ignore l'en-tête
         $wan = isset($c[3]) ? preg_replace('#/.*$#', '', $c[3]) : '';
         $out[$c[0]] = ['id' => $c[0], 'nom' => $c[1], 'prenom' => $c[2],
-                       'wan' => filter_var($wan, FILTER_VALIDATE_IP) ? $wan : ''];
+                       'wan' => filter_var($wan, FILTER_VALIDATE_IP) ? $wan : '',
+                       'classe' => isset($c[4]) ? $c[4] : ''];
     }
     uasort($out, function ($a, $b) { return strcasecmp($a['nom'] . $a['prenom'], $b['nom'] . $b['prenom']); });
     return $out;
+}
+
+// Classes présentes dans classe.csv, avec leur effectif (filtre du tableau de bord).
+function classes($classe) {
+    $out = [];
+    foreach ($classe as $e) {
+        $c = trim($e['classe']);
+        if ($c !== '') { $out[$c] = ($out[$c] ?? 0) + 1; }
+    }
+    uksort($out, 'strcasecmp');
+    return $out;
+}
+
+// Réécrit la ligne d'un étudiant dans classe.csv en conservant commentaires et en-tête.
+// Le fichier est remplacé atomiquement : une erreur d'écriture ne perd pas la liste.
+function modifier_classe($cfg, $id, $champs) {
+    $f = chemin($cfg, 'classe.csv');
+    if (!is_file($f)) { return false; }
+    $brut = (string)file_get_contents($f);
+    if ($brut === '') { return false; }
+    $bom = (strncmp($brut, "\xEF\xBB\xBF", 3) === 0) ? "\xEF\xBB\xBF" : '';
+    $lignes = preg_split('/\r\n|\n|\r/', $brut);
+    if (!is_array($lignes)) { return false; }
+    if ($bom !== '' && isset($lignes[0])) { $lignes[0] = substr($lignes[0], 3); }
+    while ($lignes && end($lignes) === '') { array_pop($lignes); }
+    $id = (string)$id;
+    $trouve = false;
+    foreach ($lignes as $i => $l) {
+        $t = trim(preg_replace('/^\xEF\xBB\xBF/', '', $l));
+        if ($t === '' || $t[0] === '#') { continue; }
+        $c = array_map('trim', str_getcsv($t, ';'));
+        if (count($c) < 3 || !preg_match('/^[0-9]+$/', $c[0]) || $c[0] !== $id) { continue; }
+        $lignes[$i] = ligne_csv([$id, $champs['nom'], $champs['prenom'], $champs['wan'], $champs['classe']]);
+        $trouve = true;
+        break;
+    }
+    if (!$trouve) { return false; }
+    $tmp = @tempnam(dirname($f), '.classe-');
+    if ($tmp === false) { return false; }
+    if (@file_put_contents($tmp, $bom . implode("\n", $lignes) . "\n") === false) { @unlink($tmp); return false; }
+    @chmod($tmp, 0640);
+    if (!@rename($tmp, $f)) { @unlink($tmp); return false; }
+    return true;
+}
+
+function ligne_csv($champs) {
+    $f = fopen('php://temp', 'r+');
+    fputcsv($f, $champs, ';', '"', '');
+    rewind($f);
+    return rtrim((string)stream_get_contents($f), "\r\n");
 }
 
 function etudiant_par_ip($classe, $ip) {

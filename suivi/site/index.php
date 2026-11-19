@@ -34,35 +34,70 @@ if (empty($_SESSION['prof'])) {
 
 // ---- Actions -----------------------------------------------------------------------------
 $msg = '';
+$erreur_modif = '';
 if ($methode === 'POST') {
     if (!hash_equals($_SESSION['jeton'], (string)($_POST['jeton'] ?? ''))) { http_response_code(403); exit('Jeton invalide.'); }
     $a = (string)($_POST['action'] ?? '');
-    if ($a === 'releve') {
-        $l = (string)($_POST['labo'] ?? 'tout');
-        $l = ($l === 'tout' || isset($CFG['labos'][$l])) ? $l : 'tout';
-        $args = '--labo ' . escapeshellarg($l);
-        if (!empty($_POST['etudiant']) && preg_match('/^[0-9]+$/', (string)$_POST['etudiant'])) { $args .= ' --etudiant ' . escapeshellarg($_POST['etudiant']); }
-        exec('nohup /usr/bin/php ' . escapeshellarg(__DIR__ . '/releve.php') . ' ' . $args . ' > ' . escapeshellarg(chemin($CFG, 'releve.log')) . ' 2>&1 &');
-        $msg = 'releve';
-    } elseif ($a === 'oublier') {
-        @unlink(chemin($CFG, 'ssh/known_hosts'));
-        $msg = 'oublier';
-    } elseif ($a === 'sortir') {
-        session_destroy();
-        header('Location: ./', true, 303);
+    if ($a === 'modifier') {
+        $id = (string)($_POST['etudiant'] ?? '');
+        $liste = classe($CFG);
+        $nom = trim((string)($_POST['nom'] ?? ''));
+        $prenom = trim((string)($_POST['prenom'] ?? ''));
+        $wan = trim((string)($_POST['wan'] ?? ''));
+        $wan = preg_replace('#/[0-9]{1,2}$#', '', $wan);   // accepte « 172.17.4.2/16 »
+        $cl = trim((string)($_POST['classe'] ?? ''));
+        if (!isset($liste[$id])) {
+            $erreur_modif = 'Étudiant inconnu.';
+        } elseif ($nom === '' || $prenom === '') {
+            $erreur_modif = 'Le nom et le prénom sont obligatoires.';
+        } elseif (mb_strlen($nom) > 60 || mb_strlen($prenom) > 60 || mb_strlen($cl) > 40) {
+            $erreur_modif = 'Nom, prénom ou classe trop long.';
+        } elseif ($wan !== '' && !filter_var($wan, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $erreur_modif = 'Adresse WAN invalide : attendu une adresse IPv4, par exemple 172.17.4.2.';
+        } elseif (!modifier_classe($CFG, $id, ['nom' => $nom, 'prenom' => $prenom, 'wan' => $wan, 'classe' => $cl])) {
+            $erreur_modif = "Impossible d'enregistrer : vérifier les droits de " . chemin($CFG, 'classe.csv') . '.';
+        } else {
+            header('Location: ./?etudiant=' . urlencode($id) . '&m=modifie', true, 303);
+            exit;
+        }
+    } else {
+        if ($a === 'releve') {
+            $l = (string)($_POST['labo'] ?? 'tout');
+            $l = ($l === 'tout' || isset($CFG['labos'][$l])) ? $l : 'tout';
+            $args = '--labo ' . escapeshellarg($l);
+            if (!empty($_POST['etudiant']) && preg_match('/^[0-9]+$/', (string)$_POST['etudiant'])) { $args .= ' --etudiant ' . escapeshellarg($_POST['etudiant']); }
+            exec('nohup /usr/bin/php ' . escapeshellarg(__DIR__ . '/releve.php') . ' ' . $args . ' > ' . escapeshellarg(chemin($CFG, 'releve.log')) . ' 2>&1 &');
+            $msg = 'releve';
+        } elseif ($a === 'oublier') {
+            @unlink(chemin($CFG, 'ssh/known_hosts'));
+            $msg = 'oublier';
+        } elseif ($a === 'sortir') {
+            session_destroy();
+            header('Location: ./', true, 303);
+            exit;
+        }
+        $retour = './?m=' . urlencode($msg) . (isset($_POST['etudiant']) ? '&etudiant=' . urlencode((string)$_POST['etudiant']) : '');
+        header('Location: ' . $retour, true, 303);
         exit;
     }
-    $retour = './?m=' . urlencode($msg) . (isset($_POST['etudiant']) ? '&etudiant=' . urlencode((string)$_POST['etudiant']) : '');
-    header('Location: ' . $retour, true, 303);
-    exit;
 }
 $messages = ['releve' => 'Relève lancée : actualisez la page dans une minute (journal en bas de page).',
-             'oublier' => 'Empreintes SSH oubliées : elles seront réapprises à la prochaine relève.'];
+             'oublier' => 'Empreintes SSH oubliées : elles seront réapprises à la prochaine relève.',
+             'modifie' => 'Fiche mise à jour.'];
 $msg = $messages[$_GET['m'] ?? ''] ?? '';
 
 $classe = classe($CFG);
 $res = resume($CFG);
 $labos = $CFG['labos'];
+
+// Filtre par classe (Jean-Louis / Hesdin / …) : ?classe=Hesdin
+$groupes = classes($classe);
+$filtre = isset($_GET['classe']) ? trim((string)$_GET['classe']) : '';
+if ($filtre !== '' && !isset($groupes[$filtre])) { $filtre = ''; }
+$classe_vue = $classe;
+if ($filtre !== '') {
+    $classe_vue = array_filter($classe, function ($e) use ($filtre) { return $e['classe'] === $filtre; });
+}
 
 // ---- Export CSV (séparateur ; et BOM, pour Excel) ----------------------------------------
 if (isset($_GET['export'])) {
@@ -70,13 +105,13 @@ if (isset($_GET['export'])) {
     header('Content-Disposition: attachment; filename="suivi-labos-' . date('Ymd-Hi') . '.csv"');
     $o = fopen('php://output', 'w');
     fwrite($o, "\xEF\xBB\xBF");
-    $tete = ['ID', 'Nom', 'Prénom', 'WAN'];
+    $tete = ['ID', 'Nom', 'Prénom', 'WAN', 'Classe'];
     foreach ($labos as $n => $t) { $tete[] = "L$n relevé %"; $tete[] = "L$n site dernier %"; $tete[] = "L$n site meilleur %"; }
     $tete[] = 'Envois'; $tete[] = 'Dernier envoi'; $tete[] = 'Dernière relève';
-    fputcsv($o, $tete, ';');
-    foreach ($classe as $id => $e) {
+    fputcsv($o, $tete, ';', '"', '');
+    foreach ($classe_vue as $id => $e) {
         $r = $res[$id] ?? [];
-        $l = [$id, $e['nom'], $e['prenom'], $e['wan']];
+        $l = [$id, $e['nom'], $e['prenom'], $e['wan'], $e['classe']];
         foreach ($labos as $n => $t) {
             $x = $r['labos'][$n] ?? [];
             $l[] = $x['releve']['score'] ?? ''; $l[] = $x['site']['score'] ?? ''; $l[] = $x['meilleur_site']['score'] ?? '';
@@ -84,7 +119,7 @@ if (isset($_GET['export'])) {
         $l[] = $r['envois'] ?? 0;
         $l[] = isset($r['dernier_site']) ? date('d/m/Y H:i', $r['dernier_site']) : '';
         $l[] = isset($r['dernier_releve']) ? date('d/m/Y H:i', $r['dernier_releve']) : '';
-        fputcsv($o, $l, ';');
+        fputcsv($o, $l, ';', '"', '');
     }
     exit;
 }
@@ -99,6 +134,10 @@ function form_post($jeton, $champs, $bouton, $classe = '') {
 
 $vue_etudiant = isset($_GET['etudiant']) ? (string)$_GET['etudiant'] : null;
 $vue_run = isset($_GET['run']) ? (string)$_GET['run'] : null;
+$vue_modif = isset($_GET['modifier']) ? (string)$_GET['modifier'] : null;
+if ($vue_modif === null && $methode === 'POST' && ($_POST['action'] ?? '') === 'modifier') {
+    $vue_modif = (string)($_POST['etudiant'] ?? '');
+}
 $inconnus = array_filter(array_keys($res), function ($k) { return strncmp($k, 'inconnu-', 8) === 0; });
 ?><!DOCTYPE html>
 <html lang="fr">
@@ -118,7 +157,37 @@ $inconnus = array_filter(array_keys($res), function ($k) { return strncmp($k, 'i
 </header>
 <?php if ($msg): ?><p class="message"><?= h($msg) ?></p><?php endif; ?>
 
-<?php if ($vue_etudiant === null): /* =============== TABLEAU DE LA CLASSE =============== */ ?>
+<?php if ($vue_modif !== null): /* =============== MODIFIER UNE FICHE =============== */
+    $e = $classe[$vue_modif] ?? null;
+?>
+<p><a class="lien" href="./<?= $filtre !== '' ? '?classe=' . h(urlencode($filtre)) : '' ?>">← la classe</a></p>
+<?php if ($e === null): ?>
+<p class="erreur">Étudiant inconnu : vérifiez la liste <code>classe.csv</code>.</p>
+<?php else: ?>
+<section class="machine">
+  <h2>Modifier <?= h($e['nom'] . ' ' . $e['prenom']) ?></h2>
+  <?php if ($erreur_modif): ?><p class="erreur"><?= h($erreur_modif) ?></p><?php endif; ?>
+  <form method="post" action="?modifier=<?= h(urlencode($e['id'])) ?>" class="formulaire">
+    <input type="hidden" name="jeton" value="<?= h($_SESSION['jeton']) ?>">
+    <input type="hidden" name="action" value="modifier">
+    <input type="hidden" name="etudiant" value="<?= h($e['id']) ?>">
+    <label>Nom <input type="text" name="nom" value="<?= h($e['nom']) ?>" maxlength="60" required></label>
+    <label>Prénom <input type="text" name="prenom" value="<?= h($e['prenom']) ?>" maxlength="60" required></label>
+    <label>Adresse WAN du routeur <input type="text" name="wan" value="<?= h($e['wan']) ?>" maxlength="18" placeholder="172.17.4.2"></label>
+    <p class="petit">Visible sur le routeur : <code>ip -4 addr show</code>, interface côté 172.17.0.0/16. Le suffixe <code>/16</code> est accepté ; sans cette adresse, les envois de l'étudiant ne sont pas reconnus.</p>
+    <label>Classe <input type="text" name="classe" value="<?= h($e['classe']) ?>" maxlength="40" list="liste-classes" placeholder="Jean-Louis ou Hesdin"></label>
+    <datalist id="liste-classes">
+      <?php foreach (array_keys($groupes) as $g): ?><option value="<?= h($g) ?>"></option><?php endforeach; ?>
+    </datalist>
+    <div class="actions">
+      <button class="principal">Enregistrer</button>
+      <a class="lien" href="?etudiant=<?= h(urlencode($e['id'])) ?>">Annuler</a>
+    </div>
+  </form>
+</section>
+<?php endif; ?>
+
+<?php elseif ($vue_etudiant === null): /* =============== TABLEAU DE LA CLASSE =============== */ ?>
 <div class="actions">
   <form method="post" action="./">
     <input type="hidden" name="jeton" value="<?= h($_SESSION['jeton']) ?>"><input type="hidden" name="action" value="releve">
@@ -127,26 +196,37 @@ $inconnus = array_filter(array_keys($res), function ($k) { return strncmp($k, 'i
     </select>
     <button type="submit" class="principal">Relever toute la classe</button>
   </form>
-  <a class="lien" href="?export=csv">Exporter en CSV (Excel)</a>
+  <a class="lien" href="?export=csv<?= $filtre !== '' ? '&amp;classe=' . h(urlencode($filtre)) : '' ?>">Exporter en CSV (Excel)</a>
   <?= form_post($_SESSION['jeton'], ['action' => 'oublier'], 'Oublier les empreintes SSH', 'discret') ?>
   <?= form_post($_SESSION['jeton'], ['action' => 'sortir'], 'Se déconnecter', 'discret') ?>
 </div>
 
+<nav class="filtres" aria-label="Filtrer par classe">
+  <span>Classe :</span>
+  <a href="./" class="<?= $filtre === '' ? 'actif' : '' ?>">Toutes <b><?= count($classe) ?></b></a>
+  <?php foreach ($groupes as $g => $n): ?>
+    <a href="?classe=<?= h(urlencode($g)) ?>" class="<?= $filtre === $g ? 'actif' : '' ?>"><?= h($g) ?> <b><?= $n ?></b></a>
+  <?php endforeach; ?>
+</nav>
+
 <?php if (!$classe): ?>
-<p class="erreur">classe.csv est vide ou absent : copiez-le dans <code><?= h(chemin($CFG, 'classe.csv')) ?></code> (format <code>id;nom;prenom;wan</code>).</p>
+<p class="erreur">classe.csv est vide ou absent : copiez-le dans <code><?= h(chemin($CFG, 'classe.csv')) ?></code> (format <code>id;nom;prenom;wan;classe</code>).</p>
+<?php elseif (!$classe_vue): ?>
+<p class="erreur">Aucun étudiant dans la classe « <?= h($filtre) ?> ».</p>
 <?php endif; ?>
 
 <div class="defile">
 <table class="classe">
-  <thead><tr><th class="g">Étudiant</th>
+  <thead><tr><th class="g">Étudiant</th><th>Classe</th>
     <?php foreach ($labos as $n => $t): ?><th title="<?= h($t) ?>">L<?= h($n) ?><br><span><?= h(mb_strimwidth($t, 0, 12, '…')) ?></span></th><?php endforeach; ?>
     <th>Envois</th><th>Dernier envoi</th><th>Dernière relève</th></tr></thead>
   <tbody>
-  <?php foreach ($classe as $id => $e): $r = $res[$id] ?? []; ?>
+  <?php foreach ($classe_vue as $id => $e): $r = $res[$id] ?? []; ?>
     <tr>
-      <td class="g"><a href="?etudiant=<?= h(urlencode($id)) ?>"><?= h($e['nom']) ?> <?= h($e['prenom']) ?></a>
+      <td class="g"><a href="?etudiant=<?= h(urlencode($id)) ?><?= $filtre !== '' ? '&amp;classe=' . h(urlencode($filtre)) : '' ?>"><?= h($e['nom']) ?> <?= h($e['prenom']) ?></a>
         <span class="petit"><?= h($e['wan'] ?: 'WAN inconnue') ?></span>
         <?php if (!empty($r['erreur_releve'])): ?><span class="alerte" title="<?= h(implode(' / ', $r['erreur_releve'])) ?>">relève impossible</span><?php endif; ?></td>
+      <td><?= h($e['classe'] ?: '—') ?> <a class="lien" href="?modifier=<?= h(urlencode($id)) ?>" title="Modifier la fiche">✎</a></td>
       <?php foreach ($labos as $n => $t): $x = $r['labos'][$n] ?? []; $rel = $x['releve']['score'] ?? null; $site = $x['site']['score'] ?? null; ?>
         <td class="note <?= h(classe_score($rel !== null ? $rel : $site)) ?>"
             title="Relevé : <?= $rel !== null ? h($rel . ' % le ' . date_courte($x['releve']['date'])) : '—' ?> · Site : <?= $site !== null ? h($site . ' % le ' . date_courte($x['site']['date'])) : '—' ?> · Meilleur site : <?= h($x['meilleur_site']['score'] ?? '—') ?>">
@@ -180,22 +260,23 @@ Survolez une case pour les dates.</p>
 <?php endif; ?>
 
 <?php elseif ($vue_run === null): /* =============== FICHE D'UN ÉTUDIANT =============== */
-    $e = $classe[$vue_etudiant] ?? ['id' => $vue_etudiant, 'nom' => $vue_etudiant, 'prenom' => '', 'wan' => ''];
+    $e = $classe[$vue_etudiant] ?? ['id' => $vue_etudiant, 'nom' => $vue_etudiant, 'prenom' => '', 'wan' => '', 'classe' => ''];
     $r = $res[$vue_etudiant] ?? [];
 ?>
-<p><a class="lien" href="./">← la classe</a></p>
+<p><a class="lien" href="./<?= $filtre !== '' ? '?classe=' . h(urlencode($filtre)) : '' ?>">← la classe</a></p>
 <section class="machine">
-  <h2><?= h($e['nom'] . ' ' . $e['prenom']) ?> <span class="hote">(<?= h($e['wan'] ?: 'WAN inconnue') ?> — <?= h(implode(', ', $r['hostnames'] ?? [])) ?>)</span></h2>
+  <h2><?= h($e['nom'] . ' ' . $e['prenom']) ?> <span class="hote">(<?= h($e['classe'] ?: 'sans classe') ?> — <?= h($e['wan'] ?: 'WAN inconnue') ?> — <?= h(implode(', ', $r['hostnames'] ?? [])) ?>)</span></h2>
   <?php if (!empty($r['erreur_releve'])): ?><p class="erreur">Dernière relève : <?= h(implode(' / ', array_map(function ($k, $v) { return "$k : $v"; }, array_keys($r['erreur_releve']), $r['erreur_releve']))) ?></p><?php endif; ?>
-  <?php if (isset($classe[$vue_etudiant]) && $e['wan'] !== ''): ?>
   <div class="actions">
+    <a class="lien" href="?modifier=<?= h(urlencode($vue_etudiant)) ?>">Modifier la fiche (classe, WAN)</a>
+    <?php if (isset($classe[$vue_etudiant]) && $e['wan'] !== ''): ?>
     <form method="post" action="./"><input type="hidden" name="jeton" value="<?= h($_SESSION['jeton']) ?>">
       <input type="hidden" name="action" value="releve"><input type="hidden" name="etudiant" value="<?= h($vue_etudiant) ?>">
       <select name="labo"><option value="tout">Tous les labos</option>
         <?php foreach ($labos as $n => $t): ?><option value="<?= h($n) ?>">Labo <?= h($n) ?> — <?= h($t) ?></option><?php endforeach; ?></select>
       <button class="principal">Relever cet étudiant</button></form>
+    <?php endif; ?>
   </div>
-  <?php endif; ?>
   <table class="fiche">
     <thead><tr><th class="g">Labo</th><th>Relevé</th><th>Site (dernier)</th><th>Site (meilleur)</th></tr></thead>
     <tbody>

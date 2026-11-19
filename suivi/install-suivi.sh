@@ -15,7 +15,7 @@
 #   - génère la clé SSH de relève et l'affiche : à coller dans verif/cle_enseignant.pub.
 #
 # Options :
-#   --classe FICHIER     copie la liste de la classe (id;nom;prenom;wan) dans /var/lib/suivi/classe.csv
+#   --classe FICHIER     copie la liste de la classe (id;nom;prenom;wan;classe) dans /var/lib/suivi/classe.csv
 #   --cron HH:MM         relève automatique de toute la classe, du lundi au vendredi à cette heure
 #   --mot-de-passe       changer le mot de passe du tableau de bord
 # =============================================================================

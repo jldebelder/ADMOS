@@ -22,13 +22,16 @@ Par l'**adresse WAN de son routeur** : les envois de son PC sortent par le NAT, 
 `172.17.ID.x`. Le fichier `classe.csv` fait le lien :
 
 ```
-id;nom;prenom;wan
-3;BELIBOU;Loredana;172.17.3.2
+id;nom;prenom;wan;classe
+3;BELIBOU;Loredana;172.17.3.2;Jean-Louis
+10;KENFACK;Stheve;;Hesdin
 ```
 
-Un envoi d'une adresse absente de `classe.csv` apparaît dans « Envois non reconnus » : complétez la colonne `wan`.
-Ce fichier contient des noms d'étudiants : il **n'est pas** dans le dépôt (voir `.gitignore`). Un modèle est dans
-`classe.exemple.csv`.
+La colonne `classe` est libre (`Jean-Louis`, `Hesdin`, …) : elle sert au filtre du tableau de bord. Une adresse
+`wan` vide signifie que les envois de l'étudiant ne sont pas encore reconnus ; ils apparaissent dans « Envois non
+reconnus » jusqu'à ce que vous complétiez l'adresse. Vous pouvez corriger la fiche (nom, WAN, classe) directement
+dans le tableau de bord : le fichier `classe.csv` du serveur est réécrit. Ce fichier contient des noms d'étudiants :
+il **n'est pas** dans le dépôt (voir `.gitignore`). Un modèle est dans `classe.exemple.csv`.
 
 ## Installation (une fois)
 
@@ -58,7 +61,9 @@ Tableau de bord : `http://172.17.0.250/suivi/` (depuis le réseau de l'école, o
 | Je veux… | Où |
 |---|---|
 | voir la classe d'un coup d'œil | page d'accueil : une ligne par étudiant, une colonne par labo. Gros chiffre = relevé ; « site NN » = dernier envoi |
+| filtrer par classe | liens **Toutes / Jean-Louis / Hesdin** au-dessus du tableau (le filtre s'applique aussi à l'export CSV) |
 | voir le détail d'un étudiant | cliquer sur son nom : relevé, dernier envoi et meilleur envoi par labo, historique, chaque rapport complet |
+| corriger un étudiant | ✎ dans le tableau ou **Modifier la fiche** sur sa fiche : nom, prénom, adresse WAN, classe |
 | relever toute la classe | bouton **Relever toute la classe** (tous les labos ou un seul). Moins d'une minute : tout part en parallèle |
 | relever un seul étudiant | sa fiche → **Relever cet étudiant** |
 | récupérer les scores | **Exporter en CSV** : pour chaque labo, relevé %, dernier envoi %, meilleur envoi % |
@@ -77,3 +82,5 @@ Tableau de bord : `http://172.17.0.250/suivi/` (depuis le réseau de l'école, o
   n'accepte que 172.17.0.0/16, des envois de 1 Mo au plus, un toutes les 5 secondes par adresse.
 * **Données** : `/var/lib/suivi` (un fichier JSON par résultat dans `resultats/<id>/`, le résumé dans
   `resume.json`). Pour repartir de zéro en début d'année : vider `resultats/` et supprimer `resume.json`.
+* **Modification de `classe.csv`** : elle se fait sur le serveur (fiche de l'étudiant). Si vous gardez une copie
+  locale du fichier, reportez-y les changements ou utilisez l'export CSV comme copie de travail.

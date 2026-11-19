@@ -106,6 +106,16 @@ td.note.faible { background: rgba(229, 103, 90, .08); }
 td.note.vide { color: var(--bord); }
 table.fiche { background: var(--fond); border-radius: 8px; margin-top: 12px; }
 .legende { color: var(--muet); font-size: 13px; }
+.filtres { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+.filtres > span { color: var(--muet); font-size: 14px; margin-right: 2px; }
+.filtres a { color: var(--muet); text-decoration: none; border: 1px solid var(--bord); border-radius: 999px; padding: 3px 12px; font-size: 14px; }
+.filtres a:hover { border-color: var(--or); color: var(--or); }
+.filtres a.actif { background: var(--or); border-color: var(--or); color: var(--fond); font-weight: bold; }
+.filtres a b { font-weight: normal; opacity: .75; }
+.formulaire { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; max-width: 560px; }
+.formulaire label { display: flex; flex-direction: column; gap: 4px; color: var(--muet); font-size: 14px; }
+.formulaire input { font: inherit; color: var(--texte); background: var(--fond); border: 1px solid var(--bord); border-radius: 8px; padding: 9px 10px; }
+.formulaire .petit { margin: 0; }
 .src-site { color: var(--info); border-color: var(--info); }
 .src-releve { color: var(--orange); border-color: var(--orange); }
 pre.log { white-space: pre-wrap; font: 13px/1.4 "Courier New", monospace; color: var(--muet); margin: 0; max-height: 320px; overflow: auto; }
