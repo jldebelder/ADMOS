@@ -16,7 +16,8 @@
 #
 # Options :
 #   --classe FICHIER     copie la liste de la classe (id;nom;prenom;wan;classe) dans /var/lib/suivi/classe.csv
-#   --cron HH:MM         relève automatique de toute la classe, du lundi au vendredi à cette heure
+#   --cron HH:MM         relève complète de la classe du lundi au vendredi à cette heure,
+#                        + relance toutes les heures (8h-19h) pour les étudiants sans réponse
 #   --mot-de-passe       changer le mot de passe du tableau de bord
 # =============================================================================
 set -eu
@@ -103,13 +104,20 @@ if [ ! -f "$DATA/ssh/id_ed25519" ]; then
 fi
 
 if [ -n "$CRON" ]; then
-  echo "${CRON#*:} ${CRON%%:*} * * 1-5 www-data /usr/bin/php $WEB/releve.php > $DATA/releve.log 2>&1" > /etc/cron.d/suivi-releve
+  {
+    echo "${CRON#*:} ${CRON%%:*} * * 1-5 www-data /usr/bin/php $WEB/releve.php --labo tout > $DATA/releve.log 2>&1"
+    # Relance : une machine qui n'a jamais répondu est réinterrogée chaque heure. L'heure est
+    # choisie APRÈS celle de maj-labos.sh sur les nœuds Proxmox (install-maj-node.sh, 10 par
+    # défaut) : la machine étudiante est d'abord mise à jour, puis elle répond à la relève.
+    echo "35 8-19 * * 1-5 www-data /usr/bin/php $WEB/releve.php --labo tout --non-releves > $DATA/relance.log 2>&1"
+  } > /etc/cron.d/suivi-releve
   chmod 644 /etc/cron.d/suivi-releve
   systemctl enable --now cron >/dev/null 2>&1 || service cron start >/dev/null 2>&1 || true
   if ! systemctl is-active --quiet cron 2>/dev/null; then
     avert "Le service cron n'a pas démarré : la relève automatique ne sera pas lancée."
   fi
-  msg "Relève automatique : du lundi au vendredi à $CRON (heure du serveur : $(date '+%Z'))"
+  msg "Relève complète : du lundi au vendredi à $CRON (heure du serveur : $(date '+%Z'))"
+  msg "Relance automatique : toutes les heures de 8h à 19h les jours de cours, seulement les étudiants qui n'ont jamais répondu"
 fi
 
 IP=$(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')

@@ -6,13 +6,15 @@
 //   php releve.php                       toute la classe, tous les labos
 //   php releve.php --labo 05             toute la classe, un seul labo
 //   php releve.php --etudiant 3          un seul étudiant (son n° dans classe.csv)
+//   php releve.php --non-releves         seulement ceux qui n'ont jamais répondu (relance toutes les heures)
+//   php releve.php --sans-agir           affiche qui serait interrogé, sans aucune connexion SSH
 //
 // Côté étudiant, la clé ne peut lancer que verif-lab, et sur le routeur elle ne peut ouvrir
 // qu'un seul tunnel : vers 10.68.69.10:22 (voir install-prof.sh).
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 require __DIR__ . '/commun.php';
 
-$opt = getopt('', ['labo:', 'etudiant:']);
+$opt = getopt('', ['labo:', 'etudiant:', 'non-releves', 'sans-agir']);
 $labo = isset($opt['labo']) ? (string)$opt['labo'] : 'tout';
 if ($labo !== 'tout') { $labo = sprintf('%02d', (int)$labo); }
 if ($labo !== 'tout' && !isset($CFG['labos'][$labo])) { fwrite(STDERR, "Labo inconnu : $labo\n"); exit(2); }
@@ -21,13 +23,37 @@ $cle = chemin($CFG, 'ssh/id_ed25519');
 $kh  = chemin($CFG, 'ssh/known_hosts');
 if (!is_readable($cle)) { fwrite(STDERR, "Clé de relève introuvable : $cle (install-suivi.sh)\n"); exit(1); }
 
+$classe = classe($CFG);
+if (isset($opt['etudiant'])) { $classe = array_intersect_key($classe, [(string)$opt['etudiant'] => 1]); }
+$sans_wan = 0;
+foreach ($classe as $e) { if ($e['wan'] === '') { $sans_wan++; } }
+$classe = array_filter($classe, function ($e) { return $e['wan'] !== ''; });
+
+// Un étudiant est « déjà passé » si une machine au moins a déjà répondu à une relève
+// et si la dernière tentative ne signale aucune erreur. Sinon on réessaie.
+if (isset($opt['non-releves'])) {
+    $resume = resume($CFG);
+    $classe = array_filter($classe, function ($e) use ($resume) { return !deja_relie($resume, $e['id']); });
+}
+
+if (isset($opt['sans-agir'])) {
+    if ($classe) {
+        foreach ($classe as $e) { printf('%-4s %-28s %s', $e['id'], $e['nom'] . ' ' . $e['prenom'], $e['wan']); echo "\n"; }
+    } else {
+        echo "Personne à interroger";
+        if (isset($opt['non-releves'])) { echo " : tous les étudiants qui ont une adresse WAN sont déjà passés"; }
+        echo ".\n";
+    }
+    if ($sans_wan) { echo "$sans_wan étudiant(s) sans adresse WAN dans classe.csv : non interrogeables.\n"; }
+    echo count($classe) . " étudiant(s) concerné(s) — aucune connexion SSH faite.\n";
+    exit(0);
+}
+
 $verrou = fopen(chemin($CFG, 'releve.lock'), 'c');
 if (!$verrou || !flock($verrou, LOCK_EX | LOCK_NB)) { echo "Une relève est déjà en cours.\n"; exit(0); }
 
-$classe = classe($CFG);
-if (isset($opt['etudiant'])) { $classe = array_intersect_key($classe, [(string)$opt['etudiant'] => 1]); }
-$classe = array_filter($classe, function ($e) { return $e['wan'] !== ''; });
-if (!$classe) { echo "Aucun étudiant avec une adresse WAN dans classe.csv.\n"; exit(0); }
+if (!$classe) { echo "Aucun étudiant à interroger.\n"; exit(0); }
+
 
 $commun = ['-T', '-i', $cle, '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'ConnectTimeout=8',
            '-o', 'StrictHostKeyChecking=accept-new', '-o', 'UserKnownHostsFile=' . $kh, '-o', 'LogLevel=ERROR'];

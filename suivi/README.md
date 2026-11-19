@@ -68,6 +68,51 @@ Tableau de bord : `http://172.17.0.250/suivi/` (depuis le réseau de l'école, o
 | relever un seul étudiant | sa fiche → **Relever cet étudiant** |
 | récupérer les scores | **Exporter en CSV** : pour chaque labo, relevé %, dernier envoi %, meilleur envoi % |
 | relever en ligne de commande | `sudo -u www-data php /var/www/suivi/releve.php [--labo 05] [--etudiant 3]` |
+| relancer seulement les sans-réponse | `… releve.php --non-releves` (ceux qui n'ont jamais répondu à une relève) |
+| voir qui serait relancé, sans rien toucher | `… releve.php --non-releves --sans-agir` |
+
+Avec `--cron`, deux tâches sont installées : la **classe complète** à l'heure choisie (jours de cours) et une
+**relance toutes les heures de 8h à 19h** qui n'interroge **que les étudiants qui n'ont jamais répondu**
+(journal séparé dans `/var/lib/suivi/relance.log`). Cette relance ne peut pas installer quoi que ce soit chez
+l'étudiant : elle montre seulement, dans « relève impossible », qui doit encore faire
+`git pull && bash install-prof.sh` (message « clé refusée ») ou dont la machine est éteinte.
+La mise à jour automatique des machines étudiantes, elle, se fait sur les nœuds Proxmox (section suivante) ;
+les deux horaires sont coordonnées : **10** sur les nœuds, **35** pour la relance du tableau de bord.
+
+## Mettre à jour les machines des étudiants (nœuds Proxmox)
+
+`maj-labos.sh` installe ou remet à jour le contrôle de labo **dans les machines qui en ont besoin**, sans
+attendre l'étudiant. Il se lance **sur un nœud Proxmox, en root**, et ne traite que les machines de ce nœud.
+
+| Commande | Effet |
+|---|---|
+| `bash install-maj-node.sh` | pose l'outil sur le nœud : `/usr/local/sbin/maj-labos.sh`, `/etc/admos-labos.conf`, tâche cron à **10 minutes de chaque heure de 8h à 19h** (jours de cours), journal `/var/log/admos-labos.log` |
+| `bash maj-labos.sh --etat` | montre l'état de chaque machine (dépôt, clé de l'enseignant, `AllowUsers`), **ne rien changer** |
+| `bash maj-labos.sh` | ne répare que ce qui est cassé : les machines déjà à jour ne sont pas touchées |
+| `bash maj-labos.sh --id 18` | un seul étudiant (n° du plan d'adressage), pratique pour tester |
+
+Comment ça rentre dans la machine : **l'agent invité QEMU** (`qm guest exec`, `pct exec` pour un conteneur),
+donc en root local, exactement comme quand l'étudiant tape lui-même `git pull && bash install-prof.sh`.
+Aucun port n'est ouvert vers la machine, aucun compte n'est ajouté, la clé de l'enseignant reste limitée à
+`verif-lab`. Une machine sans `qemu-guest-agent` est signalée : seule solution, que l'étudiant l'installe.
+
+Ce que le script change, et rien d'autre :
+
+1. `git clone` / `git pull` du dépôt (dans le dossier déjà utilisé par l'étudiant s'il existe), puis
+   `bash install-prof.sh` si la clé de l'enseignant du dépôt n'est pas dans `authorized_keys` du compte prof ;
+2. le PC (10.68.69.10) est traité **avant** le routeur (10.68.69.1), qui a besoin de la clé publique du PC ;
+   si le site HTTP du PC ne répond pas, la clé est lue dans `/var/lib/verif/id_ed25519.pub` sur le PC et passée
+   avec `--cle-fichier` ;
+3. si le durcissement sshd de l'étudiant (`AllowUsers`) bloque la relève, un fichier
+   `/etc/ssh/sshd_config.d/90-admos-prof.conf` est ajouté avec une seule ligne : `AllowUsers prof@172.17.0.250`
+   sur le routeur, `AllowUsers prof@10.68.69.1` sur le PC (le PC n'est jamais contacté directement, il voit le
+   routeur qui a ouvert le tunnel). Les autres règles de l'étudiant restent actives ; le fichier est retiré si
+   `sshd -t` refuse la configuration ou si `sshd -T` ne la reprend pas telle quelle.
+
+Le script **ne touche jamais** aux fichiers de l'étudiant ni aux VM éteintes. Il signale (sans y toucher) les
+machines au rôle indéterminable — ni 10.68.69.10 ni 10.68.69.1 : labo pas encore configuré, ou poste graphique.
+Un étudiant qui a modifié un fichier du dépôt (`git pull` refusé) ou dont la machine ne sort pas sur Internet
+doit réparer lui-même : c'est le cœur du labo.
 
 ## Ce qu'il faut savoir
 
@@ -80,6 +125,11 @@ Tableau de bord : `http://172.17.0.250/suivi/` (depuis le réseau de l'école, o
 * **Sécurité** : la clé de relève ne peut lancer que `verif-lab` chez l'étudiant, et sur le routeur elle ne peut
   ouvrir qu'un tunnel, vers `10.68.69.10:22`. Le tableau de bord est protégé par mot de passe ; `recevoir.php`
   n'accepte que 172.17.0.0/16, des envois de 1 Mo au plus, un toutes les 5 secondes par adresse.
+  La mise à jour automatique (`maj-labos.sh`) n'ajoute aucun accès : elle passe par l'agent invité de la VM,
+  comme l'étudiant qui taperait la commande lui-même, et la seule règle SSH ajoutée est l'adresse de la machine
+  de l'enseignant pour le compte `prof` (compte sans mot de passe, commande `verif-lab` imposée, pas de shell).
+  Sur le poste enseignant, `maj-labos.sh` et `install-maj-node.sh` sont copiés sur les nœuds Proxmox en root :
+  ce sont les deux seuls fichiers déposés sur un nœud.
 * **Données** : `/var/lib/suivi` (un fichier JSON par résultat dans `resultats/<id>/`, le résumé dans
   `resume.json`). Pour repartir de zéro en début d'année : vider `resultats/` et supprimer `resume.json`.
 * **Modification de `classe.csv`** : elle se fait sur le serveur (fiche de l'étudiant). Si vous gardez une copie

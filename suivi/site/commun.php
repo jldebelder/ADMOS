@@ -207,6 +207,17 @@ function resume($cfg) {
     return is_array($j) ? $j : [];
 }
 
+// Étudiant déjà atteint par une relève : au moins une machine a déjà répondu
+// et la dernière tentative ne signale aucune erreur (sinon on réessaie).
+function deja_relie($resume, $id) {
+    $x = isset($resume[$id]) ? $resume[$id] : [];
+    $repondu = false;
+    foreach (isset($x['labos']) ? $x['labos'] : [] as $l) {
+        if (isset($l['releve'])) { $repondu = true; break; }
+    }
+    return $repondu && empty($x['erreur_releve']);
+}
+
 function historique($cfg, $id, $max) {
     $dir = chemin($cfg, 'resultats/' . preg_replace('/[^a-z0-9_.-]/i', '_', $id));
     $f = is_dir($dir) ? glob($dir . '/*.json') : [];
