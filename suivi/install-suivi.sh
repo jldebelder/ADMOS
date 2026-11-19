@@ -45,9 +45,9 @@ done
 [ -f "$DIR/site/index.php" ] || { err "Dossier site/ introuvable à côté du script ($DIR)."; exit 1; }
 if [ -n "$CRON" ] && ! [[ "$CRON" =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]]; then err "--cron attend HH:MM (ex. 17:45)"; exit 2; fi
 
-msg "Paquets : Apache2, PHP, client SSH"
+msg "Paquets : Apache2, PHP, client SSH, cron"
 apt-get update -qq >/dev/null 2>&1 || true
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apache2 php libapache2-mod-php php-cli php-mbstring openssh-client >/dev/null \
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apache2 php libapache2-mod-php php-cli php-mbstring openssh-client cron >/dev/null \
   || { err "Installation des paquets impossible : vérifier l'accès Internet."; exit 1; }
 
 msg "Site : $WEB"
@@ -105,7 +105,11 @@ fi
 if [ -n "$CRON" ]; then
   echo "${CRON#*:} ${CRON%%:*} * * 1-5 www-data /usr/bin/php $WEB/releve.php > $DATA/releve.log 2>&1" > /etc/cron.d/suivi-releve
   chmod 644 /etc/cron.d/suivi-releve
-  msg "Relève automatique : du lundi au vendredi à $CRON"
+  systemctl enable --now cron >/dev/null 2>&1 || service cron start >/dev/null 2>&1 || true
+  if ! systemctl is-active --quiet cron 2>/dev/null; then
+    avert "Le service cron n'a pas démarré : la relève automatique ne sera pas lancée."
+  fi
+  msg "Relève automatique : du lundi au vendredi à $CRON (heure du serveur : $(date '+%Z'))"
 fi
 
 IP=$(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')

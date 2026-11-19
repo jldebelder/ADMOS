@@ -42,6 +42,8 @@ Ce fichier contient des noms d'étudiants : il **n'est pas** dans le dépôt (vo
    bash install-suivi.sh --classe /chemin/vers/classe.csv      # ajoutez --cron 17:45 pour une relève automatique
    ```
    Le script demande le mot de passe du tableau de bord et affiche la **clé publique de relève**.
+   La relève automatique suit l'heure du serveur : réglez-le sur Bruxelles avant de l'activer
+   (`timedatectl set-timezone Europe/Brussels`).
 3. **Dans le dépôt** (sur votre PC) :
    * collez la clé publique dans `verif/cle_enseignant.pub` ;
    * vérifiez `suivi_url` dans `verif/site/config.php` (`http://172.17.0.250/suivi/recevoir.php` par défaut) ;
