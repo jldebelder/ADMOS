@@ -20,7 +20,7 @@ umask 077
 export PATH=/usr/sbin:/sbin:/usr/bin:/bin
 export LC_ALL=C.UTF-8 LANG=C.UTF-8
 
-VERSION="2.0"
+VERSION="2.1"
 MODE="tsv"
 ROLE=""
 LABOS_DEMANDES="tout"
@@ -423,7 +423,7 @@ chk_pc_reseau() {
 # ----------------------------- PC : client DHCP ------------------------------
 chk_pc_dhcp() {
   section "Client DHCP (PC)" 03
-  if grep -rqsE '^[[:space:]]*iface[[:space:]]+[^[:space:]]+[[:space:]]+inet[[:space:]]+dhcp' /etc/network/interfaces /etc/network/interfaces.d/; then
+  if grep -RqsE '^[[:space:]]*iface[[:space:]]+[^[:space:]]+[[:space:]]+inet[[:space:]]+dhcp' /etc/network/interfaces /etc/network/interfaces.d/; then
     ok p.dhcp "Carte du PC en DHCP (iface … inet dhcp)"
   else
     warn p.dhcp "Carte du PC en DHCP (iface … inet dhcp)" "adresse statique" "Labo DHCP, étape 3 : iface ens18 inet dhcp. La statique reste acceptable en secours."
@@ -532,7 +532,10 @@ chk_apache() {
     warn a.default "Site par défaut 000-default désactivé" "encore actif" "a2dissite 000-default.conf && systemctl reload apache2"
   else ok a.default "Site par défaut 000-default désactivé"; fi
 
-  local dr; dr=$(grep -rhiE '^[[:space:]]*DocumentRoot' /etc/apache2/sites-enabled/ 2>/dev/null | awk '{print $2}' | tr -d '"' | grep -Fx "$DOCROOT_ATTENDU" | head -n1)
+  # -R (et non -r) : les fichiers de sites-enabled sont des liens symboliques créés par a2ensite,
+  # que grep -r ne suit pas (faux KO « non déclaré » signalé par les étudiants, labo 04).
+  # Guillemets et barre oblique finale éventuels retirés avant comparaison.
+  local dr; dr=$(grep -RhiE '^[[:space:]]*DocumentRoot' /etc/apache2/sites-enabled/ 2>/dev/null | awk '{print $2}' | tr -d "\"'" | sed 's:/*$::' | grep -Fx "$DOCROOT_ATTENDU" | head -n1)
   if [ -n "$dr" ] && [ -d "$dr" ]; then ok a.docroot "DocumentRoot $DOCROOT_ATTENDU existe"
   elif [ -z "$dr" ]; then ko a.docroot "DocumentRoot $DOCROOT_ATTENDU" "non déclaré dans les sites activés" "DocumentRoot $DOCROOT_ATTENDU dans /etc/apache2/sites-available/eafc.lab.conf"
   else ko a.docroot "DocumentRoot $DOCROOT_ATTENDU existe" "dossier introuvable" "mkdir -p $DOCROOT_ATTENDU"; fi
@@ -940,7 +943,7 @@ chk_nfs_serveur() {
 
   local vers; vers=$(cat /proc/fs/nfsd/versions 2>/dev/null)
   if [ -n "$vers" ] && ! grep -qE '(^| )\+3( |$)' <<<"$vers"; then ok n.v4 "NFSv4 seul (v3 désactivé)" "$vers"
-  elif grep -rqsE '^[[:space:]]*vers3[[:space:]]*=[[:space:]]*(n|no|0)' /etc/nfs.conf /etc/nfs.conf.d/; then
+  elif grep -RqsE '^[[:space:]]*vers3[[:space:]]*=[[:space:]]*(n|no|0)' /etc/nfs.conf /etc/nfs.conf.d/; then
     warn n.v4 "NFSv4 seul (v3 désactivé)" "réglé dans nfs.conf mais pas encore appliqué" "systemctl restart nfs-server"
   else ko n.v4 "NFSv4 seul (v3 désactivé)" "versions : ${vers:-?}" "printf '[nfsd]\\nvers3=n\\n' > /etc/nfs.conf.d/nfsv4-only.conf && systemctl restart nfs-server"; fi
 
@@ -977,7 +980,7 @@ chk_nfs_client() {
   if [ "$srv_ok" -eq 1 ]; then ok n.joint "Le serveur NFS répond (10.68.69.10:2049)"
   else ko n.joint "Le serveur NFS répond (10.68.69.10:2049)" "port fermé" "nfs-server actif sur le PC ? règle 2049 dans le pare-feu du PC ?"; fi
 
-  if pkg_ok autofs && svc_active autofs && grep -rqsE '10\.68\.69\.10:/srv/data' /etc/auto.master /etc/auto.master.d/ /etc/auto.*; then
+  if pkg_ok autofs && svc_active autofs && grep -RqsE '10\.68\.69\.10:/srv/data' /etc/auto.master /etc/auto.master.d/ /etc/auto.*; then
     ok n.auto "Montage à la demande (autofs)"; automount=1
   elif systemctl list-units --type=automount --all --no-legend 2>/dev/null | grep -q 'data'; then
     ok n.auto "Montage à la demande (automount systemd)"; automount=1
